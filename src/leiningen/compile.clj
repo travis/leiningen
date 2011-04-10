@@ -1,12 +1,12 @@
 (ns leiningen.compile
   "Compile Clojure source into .class files."
-  (:require lancet)
-  (:use  [leiningen.deps :only [deps]]
-         [leiningen.core :only [ns->path]]
-         [leiningen.javac :only [javac]]
-         [leiningen.classpath :only [make-path find-lib-jars get-classpath]]
-         [clojure.java.io :only [file]]
-         [leiningen.util.ns :only [namespaces-in-dir]])
+  (:require [lancet.core :as lancet])
+  (:use [leiningen.deps :only [deps]]
+        [leiningen.core :only [ns->path]]
+        [leiningen.javac :only [javac]]
+        [leiningen.classpath :only [make-path find-lib-jars get-classpath]]
+        [clojure.java.io :only [file]]
+        [leiningen.util.ns :only [namespaces-in-dir]])
   (:refer-clojure :exclude [compile])
   (:import (org.apache.tools.ant.taskdefs Java)
            (java.lang.management ManagementFactory)
@@ -169,7 +169,8 @@
       (when (:debug project)
         (System/setProperty "clojure.debug" "true"))
       ;; need to at least pretend to return an exit code
-      (try (eval form)
+      (try (binding [*warn-on-reflection* (:warn-on-reflection project)]
+             (eval form))
            0
            (catch Exception e
              (.printStackTrace e)
@@ -220,22 +221,36 @@
                                     (:compile-path project)
                                     (:source-path project)) ".clj")))))
 
+(defn- relative-path [project f]
+  (let [root-length (if (= \/ (last (:compile-path project)))
+                      (count (:compile-path project))
+                      (inc (count (:compile-path project))))]
+    (subs (.getAbsolutePath f) root-length)))
+
 (defn- blacklisted-class? [project f]
   ;; true indicates all non-project classes are blacklisted
   (or (true? (:clean-non-project-classes project))
-      (let [relative (subs (.getAbsolutePath f) (count (:root project)))]
-        (some #(re-find % relative) (:clean-non-project-classes project)))))
+      (some #(re-find % (relative-path project f))
+            (:clean-non-project-classes project))))
+
+(defn- whitelisted-class? [project f]
+  (or (class-in-project? project f)
+      (and (:class-file-whitelist project)
+           (re-find (:class-file-whitelist project)
+                    (relative-path project f)))))
 
 (defn clean-non-project-classes [project]
   (when (:clean-non-project-classes project)
     (doseq [f (file-seq (file (:compile-path project)))
-            :when (and (.isFile f) (not (class-in-project? project f))
+            :when (and (.isFile f)
+                       (not (whitelisted-class? project f))
                        (blacklisted-class? project f))]
       (.delete f))))
 
 (defn- status [code msg]
   (when-not *silently*
-    (.write (if (zero? code) *out* *err*) (str msg "\n")))
+    (binding [*out* (if (zero? code) *out* *err*)]
+      (println msg)))
   code)
 
 (def ^{:private true} success (partial status 0))
@@ -250,7 +265,6 @@ those given as command-line arguments."
        (javac project))
      (if (seq (compilable-namespaces project))
        (if-let [namespaces (seq (stale-namespaces project))]
-
          (binding [*skip-auto-compile* true]
            (try
              (if (zero? (eval-in-project project

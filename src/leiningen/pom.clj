@@ -2,6 +2,7 @@
   "Write a pom.xml file to disk for Maven interop."
   (:use [leiningen.util.maven :only [make-exclusion make-dependency
                                      make-model]]
+        [leiningen.core :only [abort]]
         [clojure.java.io :only [copy file]])
   (:import (java.io StringWriter ByteArrayOutputStream)
            (java.util Properties)
@@ -16,13 +17,16 @@
 (defn snapshot? [project]
   (re-find #"SNAPSHOT" (:version project)))
 
+(def ^{:doc "For backwards-compatibility"} default-repos
+  leiningen.core/default-repos)
+
 (defn check-for-snapshot-deps [project]
   (when (and (not (snapshot? project))
              (not (System/getenv "LEIN_SNAPSHOTS_IN_RELEASE"))
              (some #(re-find #"SNAPSHOT" (second %)) (:dependencies project)))
-    (throw (Exception. (str "Release versions may not depend upon snapshots."
-                            "\nSet the LEIN_SNAPSHOTS_IN_RELEASE environment"
-                            " variable to override this.")))))
+    (abort "Release versions may not depend upon snapshots."
+           "\nFreeze snapshots to dated versions or set the"
+           "LEIN_SNAPSHOTS_IN_RELEASE environment variable to override this.")))
 
 (defn make-pom
   ([project] (make-pom project false))

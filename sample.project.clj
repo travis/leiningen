@@ -40,6 +40,10 @@
   ;; development. Projects that depend on this project will not pull
   ;; in its dev-dependencies, and they won't be included in the uberjar.
   :dev-dependencies [[org.clojure/swank-clojure "1.2.1"]]
+  ;; Global exclusions are applied across the board, as an alternative
+  ;; to duplication for multiple depedencies with the same excluded libraries.
+  :exclusions [org.apache.poi/poi
+               org.apache.poi/poi-ooxml]
   ;; Only re-fetch dependencies when they change in project.clj or
   ;; when :library-path directory is empty.
   :checksum-deps true
@@ -47,13 +51,24 @@
   :min-lein-version "1.3.0"
   ;; Before fetching dependencies, the contents of the lib/ directory
   ;; will get deleted unless this is set to true.
-  :disable-implicit-clean false
+  :disable-deps-clean false
   ;; Delete .class files that do not have a correspoinding package in
   ;; the src/ directory. Workaround for Clojure bug CLJ-322. Causes problems
   ;; with protocols in upstream libraries; false by default. Set to
   ;; true to delete all non-project classes or set to a seq of regexes
   ;; to only delete class files that match one of the regexes.
   :clean-non-project-classes true
+  ;; If :clean-non-project-classes is set to true, you can set this to
+  ;; be a regex; all class filenames that match this regex will be preserved.
+  :class-file-whitelist #"^(org/example|clojure)"
+  ;; Additional files (besides :compile-path contents and jars/uberjars)
+  ;; to be deleted during clean phase. May contain %s, which will be replaced
+  ;; with the project's current version number.
+  :extra-files-to-clean ["tmp" "sample-%s.tar"]
+  ;; If the files you want to delete can't be exact matches, you can
+  ;; use a regex that will be matched against filenames in the project root.
+  ;; Defaults to #"^$NAME-.*\.jar$".
+  :regex-to-clean #"hs_err_pid.*"
   ;; Load these namespaces on startup to pick up hooks from them. Hooks
   ;; generally come from plugins, but may be included in your project source.
   :hooks [leiningen.hooks.difftest]
@@ -68,13 +83,17 @@
   ;; These namespaces will be AOT-compiled. Needed for gen-class and
   ;; other Java interop functionality. :namespaces is an alias for this.
   ;; Put a regex here to compile all namespaces whose names match.
-  :aot [org.example.sample.SampleClass]
+  :aot [org.example.sample]
   ;; The -main function in this namespace will be run at launch if you
   ;; create an uberjar. Repl sessions will start in this namespace as well.
   ;; Set :skip-aot metadata on this symbol to use it for other things like the
-  ;; run task or shell wrappers without bringing in AOT.
+  ;; run task or shell wrappers without bringing in AOT if you don't need an
+  ;; executable uberjar.
   :main org.example.sample
-  ;; This will get loaded automatically when you launch a repl.
+  ;; This namespace will get loaded automatically when you launch a repl.
+  :repl-init sample.repl-helper
+  ;; This file will get loaded automatically when you launch a repl,
+  ;; but it's deprecated; use :repl-init above instead.
   :repl-init-script "src/main/clojure/init.clj"
   ;; These will get passed to clojure.main/repl; see its docstring for details.
   :repl-options [:prompt (fn [] (print "your command, master? ") (flush))]
@@ -89,14 +108,14 @@
   ;; Set this in order to only use the :repositories you list below.
   :omit-default-repositories true
   :repositories {"java.net" "http://download.java.net/maven/2"
-                 "bigend" {:url "http://blueant.com/archiva/repository/internal"
-                           :username "milgrim"
-                           :password "locative.1"}}
-  ;; Remote repository to which to deploy. (http:// or file://)
-  :deploy-to {:snapshots "http://blueant.com/archiva/repository/snapshots"
-              :releases "http://blueant.com/archiva/repository/internal"
-              ;; Also supports :private-key and :passphrase.
-              :username "milgrim" :password "locative.1"}
+                 "sonatype"
+                 {:url "http://oss.sonatype.org/content/repositories/releases"
+                  :snapshots false}
+                 "snapshots" {:url "http://blueant.com/archiva/snapshots"
+                              ;; Also supports :private-key and :passphrase.
+                              :username "milgrim" :password "locative.1"}
+                 "releases" {:url "http://blueant.com/archiva/internal"
+                             :username "milgrim" :password "locative.1"}}
   ;; If you'd rather use a different directory structure, you can set these.
   :source-path "src/main/clojure"
   :library-path "target/dependency"
@@ -123,3 +142,13 @@
   :jvm-opts ["-Xmx1g"]
   ;; If your project is a Leiningen plugin, set this to skip the subprocess step
   :eval-in-leiningen false)
+
+;; You can use Robert Hooke to modify behaviour of any task function,
+;; but the prepend-tasks function is shorthand that is more convenient
+;; on tasks that take a single project argument.
+(use '[leiningen.core :only [prepend-tasks]]
+     '[leiningen.deps :only [deps]]
+     '[leiningen.clean :only [clean]]
+     '[leiningen.pom :only [pom]])
+
+(prepend-tasks #'deps clean pom)
